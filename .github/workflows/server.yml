@@ -74,36 +74,27 @@ jobs:
           ]
           OPS
 
-      - name: Install Playit
+      - name: Install and start Playit with Secret Key
+        env:
+          PLAYIT_SECRET: ${{ secrets.PLAYIT_SECRET }}
         run: |
           echo "Downloading Playit..."
-          PLAYIT_URL=$(curl -s https://api.github.com/repos/playit-cloud/playit-agent/releases/latest | grep "browser_download_url.*playit-linux-amd64" | head -1 | cut -d '"' -f 4)
-          
-          if [ -z "$PLAYIT_URL" ]; then
-            echo "Trying backup URL..."
-            curl -L -o playit https://github.com/playit-cloud/playit-agent/releases/download/v0.15.26/playit-linux-amd64
-          else
-            curl -L -o playit "$PLAYIT_URL"
-          fi
-          
+          curl -L -o playit https://github.com/playit-cloud/playit-agent/releases/download/v0.15.26/playit-linux-amd64
           chmod +x playit
-          echo "Playit downloaded!"
-
-      - name: Start Playit
-        run: |
-          echo "========================================="
-          echo "  Starting Playit..."
-          echo "========================================="
+          
+          echo "Creating Playit config with your account..."
+          mkdir -p ~/.config/playit
+          cat > ~/.config/playit/config.toml << EOF
+          secret_key = "$PLAYIT_SECRET"
+          EOF
+          
+          echo "Starting Playit..."
           ./playit &
-          PLAYIT_PID=$!
-          
-          sleep 30
+          sleep 20
           
           echo "========================================="
-          echo "  Playit started with PID: $PLAYIT_PID"
-          echo "  Look above for the claim URL"
-          echo "  It looks like:"
-          echo "  https://playit.gg/claim/xxxxxxxx"
+          echo "  Playit started with your account!"
+          echo "  Check playit.gg for your server address"
           echo "========================================="
 
       - name: Start Minecraft Server
@@ -149,6 +140,7 @@ jobs:
           
           echo "========================================="
           echo "  SERVER IS RUNNING!"
+          echo "  Go to playit.gg to see your server address"
           echo "========================================="
           
           while kill -0 $MC_PID 2>/dev/null; do
