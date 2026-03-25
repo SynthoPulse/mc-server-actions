@@ -51,8 +51,8 @@ jobs:
           cat > server.properties << 'PROPS'
           server-port=25565
           gamemode=survival
-          difficulty=normal
-          max-players=5
+          difficulty=hard
+          max-players=4
           view-distance=6
           simulation-distance=4
           allow-flight=true
@@ -89,31 +89,39 @@ jobs:
           OPS
           echo "ops.json created!"
 
-      - name: Setup SSH tunnel with serveo
+      - name: Install and connect Playit automatically
+        env:
+          PLAYIT_SECRET: ${{ secrets.PLAYIT_SECRET }}
         run: |
-          echo "Setting up SSH tunnel..."
-          sudo apt-get install -y autossh 2>/dev/null || true
+          echo "Downloading Playit..."
+          curl -L -o playit https://github.com/playit-cloud/playit-agent/releases/download/v0.15.26/playit-linux-amd64
+          chmod +x playit
           
-          ssh-keygen -t rsa -b 2048 -f ~/.ssh/id_rsa -N "" -q
+          echo "Creating Playit config with secret key..."
+          cat > playit.toml << EOF
+          secret_key = "$PLAYIT_SECRET"
+          EOF
           
-          ssh -o StrictHostKeyChecking=no \
-              -o ServerAliveInterval=60 \
-              -o ServerAliveCountMax=3 \
-              -R 25565:localhost:25565 \
-              serveo.net > serveo_output.log 2>&1 &
+          echo "Starting Playit..."
+          ./playit --config playit.toml > playit.log 2>&1 &
           
-          SSH_PID=$!
-          echo "SSH tunnel PID: $SSH_PID"
-          
-          sleep 15
+          sleep 30
           
           echo "========================================="
-          echo "  TUNNEL OUTPUT:"
-          cat serveo_output.log 2>/dev/null || echo "No output yet"
+          echo "  Playit Status:"
+          cat playit.log
           echo "========================================="
           
-          SERVER_ADDR=$(grep -o "Forwarding TCP.*" serveo_output.log 2>/dev/null | head -1)
-          echo "Server address info: $SERVER_ADDR"
+          if grep -q "connected" playit.log 2>/dev/null; then
+            echo "SUCCESS: Playit connected automatically!"
+          elif grep -q "claim" playit.log 2>/dev/null; then
+            CLAIM_URL=$(grep -o "https://playit.gg/claim/[a-zA-Z0-9]*" playit.log | head -1)
+            echo "========================================="
+            echo "  OPEN THIS URL AND PRESS CLAIM:"
+            echo "  $CLAIM_URL"
+            echo "========================================="
+            sleep 60
+          fi
 
       - name: Start Minecraft Server
         run: |
@@ -158,16 +166,13 @@ jobs:
 
           echo "========================================="
           echo "  SERVER IS RUNNING!"
+          echo "  Go to playit.gg/account/tunnels"
+          echo "  Copy your fixed server address"
           echo "========================================="
-          
-          echo "Tunnel address:"
-          cat serveo_output.log 2>/dev/null || true
 
           while kill -0 $MC_PID 2>/dev/null; do
             sleep 300
             echo "Auto-saving world..."
-            echo "Current tunnel info:"
-            cat serveo_output.log 2>/dev/null | tail -5 || true
           done
 
       - name: Save world
