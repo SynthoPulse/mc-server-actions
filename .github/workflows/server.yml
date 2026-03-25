@@ -63,6 +63,8 @@ jobs:
           enable-command-block=true
           PROPS
 
+      - name: Setup ops.json
+        run: |
           cat > ops.json << 'OPS'
           [
             {
@@ -85,22 +87,33 @@ jobs:
             }
           ]
           OPS
+          echo "ops.json created!"
 
-      - name: Install and start Playit
-        env:
-          PLAYIT_SECRET: ${{ secrets.PLAYIT_SECRET }}
+      - name: Setup SSH tunnel with serveo
         run: |
-          echo "Downloading Playit..."
-          curl -L -o playit https://github.com/playit-cloud/playit-agent/releases/download/v0.15.26/playit-linux-amd64
-          chmod +x playit
+          echo "Setting up SSH tunnel..."
+          sudo apt-get install -y autossh 2>/dev/null || true
           
-          echo "Starting Playit..."
-          PLAYIT_SECRET_KEY="$PLAYIT_SECRET" ./playit &
+          ssh-keygen -t rsa -b 2048 -f ~/.ssh/id_rsa -N "" -q
           
-          sleep 20
+          ssh -o StrictHostKeyChecking=no \
+              -o ServerAliveInterval=60 \
+              -o ServerAliveCountMax=3 \
+              -R 25565:localhost:25565 \
+              serveo.net > serveo_output.log 2>&1 &
+          
+          SSH_PID=$!
+          echo "SSH tunnel PID: $SSH_PID"
+          
+          sleep 15
+          
           echo "========================================="
-          echo "  Playit started!"
+          echo "  TUNNEL OUTPUT:"
+          cat serveo_output.log 2>/dev/null || echo "No output yet"
           echo "========================================="
+          
+          SERVER_ADDR=$(grep -o "Forwarding TCP.*" serveo_output.log 2>/dev/null | head -1)
+          echo "Server address info: $SERVER_ADDR"
 
       - name: Start Minecraft Server
         run: |
@@ -146,10 +159,15 @@ jobs:
           echo "========================================="
           echo "  SERVER IS RUNNING!"
           echo "========================================="
+          
+          echo "Tunnel address:"
+          cat serveo_output.log 2>/dev/null || true
 
           while kill -0 $MC_PID 2>/dev/null; do
             sleep 300
             echo "Auto-saving world..."
+            echo "Current tunnel info:"
+            cat serveo_output.log 2>/dev/null | tail -5 || true
           done
 
       - name: Save world
