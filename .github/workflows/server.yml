@@ -51,8 +51,8 @@ jobs:
           cat > server.properties << 'PROPS'
           server-port=25565
           gamemode=survival
-          difficulty=hard
-          max-players=4
+          difficulty=normal
+          max-players=5
           view-distance=6
           simulation-distance=4
           allow-flight=true
@@ -103,7 +103,7 @@ jobs:
           EOF
           
           echo "Starting Playit..."
-          ./playit --config playit.toml > playit.log 2>&1 &
+          PLAYIT_SECRET_KEY="$PLAYIT_SECRET" ./playit > playit.log 2>&1 &
           
           sleep 30
           
