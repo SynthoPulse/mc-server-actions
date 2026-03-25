@@ -51,8 +51,8 @@ jobs:
           cat > server.properties << 'PROPS'
           server-port=25565
           gamemode=survival
-          difficulty=normal
-          max-players=5
+          difficulty=hard
+          max-players=3
           view-distance=6
           simulation-distance=4
           allow-flight=true
