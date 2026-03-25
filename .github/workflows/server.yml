@@ -1,0 +1,132 @@
+name: Minecraft Server
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */6 * * *'
+
+jobs:
+  server:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360  # 6 ساعات كحد أقصى لكل تشغيل
+
+    steps:
+      - name: ✅ تثبيت Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: ⬇️ تحميل Forge + إعداد السيرفر
+        run: |
+          wget -q https://maven.minecraftforge.net/net/minecraftforge/forge/1.19.2-43.5.1/forge-1.19.2-43.5.1-installer.jar
+          java -jar forge-1.19.2-43.5.1-installer.jar --installServer
+          rm forge-1.19.2-43.5.1-installer.jar
+          echo "eula=true" > eula.txt
+
+      - name: ⚙️ إعداد server.properties (الأفضل لـ 2 لاعبين)
+        run: |
+          cat > server.properties << 'PROPS'
+          server-port=25565
+          gamemode=survival
+          difficulty=normal
+          max-players=5
+          view-distance=6          # أقرب قليلاً لتحسين الأداء على 7GB RAM
+          simulation-distance=4
+          allow-flight=true         # ✅ تفعيل الطيران (يحّل مشكلة الإيليترا)
+          pvp=false                 # ❌ إلغاء ضرب اللاعبين
+          motd=✅ SynthoPulse Server — Free & Fast
+          online-mode=false         # يسمح بالدخول من TLauncher
+          PROPS
+
+      - name: 📦 جلب ملفات المستودع (المودات + الإعدادات)
+        uses: actions/checkout@v4
+        with:
+          path: repo
+
+      - name: 📂 نسخ المودات والإعدادات إلى السيرفر
+        run: |
+          mkdir -p mods config
+          if [ -d "repo/mods" ]; then
+            cp repo/mods/*.jar mods/ 2>/dev/null || echo "⚠️ لا يوجد مودات بعد"
+          fi
+          if [ -d "repo/config" ]; then
+            cp -r repo/config/* config/ 2>/dev/null || echo "⚠️ لا يوجد ملفات config بعد"
+          fi
+
+      - name: 💾 استعادة عالمك المحفوظ (إن وجد)
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            world
+            world_nether
+            world_the_end
+            banned-players.json
+            banned-ips.json
+            ops.json
+            whitelist.json
+          key: mc-world-save
+          restore-keys: |
+            mc-world-save-
+
+      - name: 🌐 تثبيت وتشغيل Playit (للحصول على عنوان عام مجاني)
+        run: |
+          curl -SsL https://playit.gg/downloads/playit-linux-amd64 -o playit
+          chmod +x playit
+          ./playit &
+          sleep 15
+          echo "✅ Playit يعمل في الخلفية..."
+
+      - name: 🚀 تشغيل السيرفر + حفظ تلقائي كل 5 دقائق
+        run: |
+          # تشغيل السيرفر في الخلفية
+          java -Xmx5G -Xms2G \
+            -XX:+UseG1GC \
+            -XX:+ParallelRefProcEnabled \
+            -XX:MaxGCPauseMillis=200 \
+            -XX:+UnlockExperimentalVMOptions \
+            -XX:+DisableExplicitGC \
+            -XX:G1NewSizePercent=30 \
+            -XX:G1MaxNewSizePercent=40 \
+            -XX:G1HeapRegionSize=8M \
+            -XX:G1ReservePercent=20 \
+            -XX:InitiatingHeapOccupancyPercent=15 \
+            -XX:G1MixedGCLiveThresholdPercent=90 \
+            -XX:SurvivorRatio=32 \
+            -XX:+PerfDisableSharedMem \
+            -XX:MaxTenuringThreshold=1 \
+            @libraries/net/minecraftforge/forge/1.19.2-43.5.1/unix_args.txt nogui &
+          
+          MC_PID=$!
+          echo "⏳ انتظار تشغيل السيرفر..."
+          
+          # انتظار حتى يكتمل التحميل ويظهر "Done"
+          while ! grep -q "Done! For help, type \"help\"" logs/latest.log 2>/dev/null; do
+            sleep 10
+            echo "🔄 لا يزال السيرفر يحمّل المودات..."
+          done
+          
+          echo "✅ السيرفر يعمل الآن! يمكنك الدخول 🎮"
+          
+          # 🔁 حلقة حفظ تلقائي: كل 5 دقائق ترسل أمر save-all
+          while kill -0 $MC_PID 2>/dev/null; do
+            sleep 300
+            echo "💾 حفظ العالم تلقائياً..."
+            screen -S mc -X stuff "save-all$(printf '\r')" 2>/dev/null || true
+          done
+          
+          echo "🛑 السيرفر توقف."
+
+      - name: 💾 حفظ العالم تلقائياً في GitHub (لعدم فقدانه)
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            world
+            world_nether
+            world_the_end
+            banned-players.json
+            banned-ips.json
+            ops.json
+            whitelist.json
+          key: mc-world-save
