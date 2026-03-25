@@ -37,16 +37,14 @@ jobs:
 
       - name: Download and install Forge
         run: |
-          echo "========================================="
-          echo "  Downloading Forge 1.19.2-43.3.5"
-          echo "========================================="
+          echo "Downloading Forge 1.19.2-43.3.5..."
           wget -q https://maven.minecraftforge.net/net/minecraftforge/forge/1.19.2-43.3.5/forge-1.19.2-43.3.5-installer.jar
           echo "Installing Forge server..."
           java -jar forge-1.19.2-43.3.5-installer.jar --installServer
           rm forge-1.19.2-43.3.5-installer.jar
           rm forge-1.19.2-43.3.5-installer.jar.log 2>/dev/null || true
           echo "eula=true" > eula.txt
-          echo "Forge installed successfully!"
+          echo "Forge installed!"
 
       - name: Configure server
         run: |
@@ -76,18 +74,45 @@ jobs:
           ]
           OPS
 
-      - name: Install and start Playit
+      - name: Install Playit
         run: |
-          curl -SsL https://playit.gg/downloads/playit-linux-amd64 -o playit
+          echo "Downloading Playit..."
+          PLAYIT_URL=$(curl -s https://api.github.com/repos/playit-cloud/playit-agent/releases/latest | grep "browser_download_url.*playit-linux-amd64" | head -1 | cut -d '"' -f 4)
+          
+          if [ -z "$PLAYIT_URL" ]; then
+            echo "Trying backup URL..."
+            curl -L -o playit https://github.com/playit-cloud/playit-agent/releases/download/v0.15.26/playit-linux-amd64
+          else
+            curl -L -o playit "$PLAYIT_URL"
+          fi
+          
           chmod +x playit
-          ./playit &
-          sleep 20
+          echo "Playit downloaded!"
+
+      - name: Start Playit
+        run: |
           echo "========================================="
-          echo "  Playit is running!"
+          echo "  Starting Playit..."
+          echo "========================================="
+          ./playit &
+          PLAYIT_PID=$!
+          
+          sleep 30
+          
+          echo "========================================="
+          echo "  Playit started with PID: $PLAYIT_PID"
+          echo "  Look above for the claim URL"
+          echo "  It looks like:"
+          echo "  https://playit.gg/claim/xxxxxxxx"
           echo "========================================="
 
       - name: Start Minecraft Server
         run: |
+          echo "========================================="
+          echo "  Starting Minecraft Server..."
+          echo "  Forge 1.19.2-43.3.5 | RAM: 4GB"
+          echo "========================================="
+          
           java -Xmx4G -Xms4G \
             -XX:+UseG1GC \
             -XX:+ParallelRefProcEnabled \
@@ -116,7 +141,7 @@ jobs:
             ELAPSED=$((ELAPSED + 10))
             echo "Loading mods... ($ELAPSED seconds)"
             if [ $ELAPSED -ge $TIMEOUT ]; then
-              echo "Server took too long to start"
+              echo "Server took too long!"
               cat logs/latest.log 2>/dev/null | tail -50
               exit 1
             fi
@@ -131,7 +156,7 @@ jobs:
             echo "Auto-saving world..."
           done
 
-      - name: Save world to cache
+      - name: Save world
         if: always()
         uses: actions/cache/save@v4
         with:
