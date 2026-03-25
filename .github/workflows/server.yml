@@ -52,7 +52,7 @@ jobs:
           server-port=25565
           gamemode=survival
           difficulty=normal
-          max-players=3
+          max-players=5
           view-distance=6
           simulation-distance=4
           allow-flight=true
@@ -62,12 +62,24 @@ jobs:
           spawn-protection=0
           enable-command-block=true
           PROPS
-          
+
           cat > ops.json << 'OPS'
           [
             {
-              "uuid": "00000000-0000-0000-0000-000000000000",
+              "uuid": "00000000-0000-0000-0000-000000000001",
               "name": "MustafaX",
+              "level": 4,
+              "bypassesPlayerLimit": true
+            },
+            {
+              "uuid": "00000000-0000-0000-0000-000000000002",
+              "name": "muhammad12000",
+              "level": 4,
+              "bypassesPlayerLimit": true
+            },
+            {
+              "uuid": "00000000-0000-0000-0000-000000000003",
+              "name": "AbbasMaster",
               "level": 4,
               "bypassesPlayerLimit": true
             }
@@ -81,17 +93,14 @@ jobs:
           echo "Downloading Playit..."
           curl -L -o playit https://github.com/playit-cloud/playit-agent/releases/download/v0.15.26/playit-linux-amd64
           chmod +x playit
-          
           echo "Creating Playit config with your account..."
           mkdir -p ~/.config/playit
           cat > ~/.config/playit/config.toml << EOF
           secret_key = "$PLAYIT_SECRET"
           EOF
-          
           echo "Starting Playit..."
           ./playit &
           sleep 20
-          
           echo "========================================="
           echo "  Playit started with your account!"
           echo "  Check playit.gg for your server address"
@@ -103,8 +112,8 @@ jobs:
           echo "  Starting Minecraft Server..."
           echo "  Forge 1.19.2-43.3.5 | RAM: 4GB"
           echo "========================================="
-          
-          java -Xmx5G -Xms2G \
+
+          java -Xmx4G -Xms4G \
             -XX:+UseG1GC \
             -XX:+ParallelRefProcEnabled \
             -XX:MaxGCPauseMillis=200 \
@@ -121,10 +130,10 @@ jobs:
             -XX:MaxTenuringThreshold=1 \
             -Dlog4j2.formatMsgNoLookups=true \
             @libraries/net/minecraftforge/forge/1.19.2-43.3.5/unix_args.txt nogui &
-          
+
           MC_PID=$!
           echo "Waiting for server to start..."
-          
+
           TIMEOUT=600
           ELAPSED=0
           while ! grep -q "Done" logs/latest.log 2>/dev/null; do
@@ -137,12 +146,11 @@ jobs:
               exit 1
             fi
           done
-          
+
           echo "========================================="
           echo "  SERVER IS RUNNING!"
-          echo "  Go to playit.gg to see your server address"
           echo "========================================="
-          
+
           while kill -0 $MC_PID 2>/dev/null; do
             sleep 300
             echo "Auto-saving world..."
