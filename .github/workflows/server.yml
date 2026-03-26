@@ -51,8 +51,8 @@ jobs:
           cat > server.properties << 'PROPS'
           server-port=25565
           gamemode=survival
-          difficulty=hard
-          max-players=3
+          difficulty=normal
+          max-players=5
           view-distance=6
           simulation-distance=4
           allow-flight=true
@@ -62,32 +62,6 @@ jobs:
           spawn-protection=0
           enable-command-block=true
           PROPS
-
-      - name: Setup ops.json
-        run: |
-          cat > ops.json << 'OPS'
-          [
-            {
-              "uuid": "00000000-0000-0000-0000-000000000001",
-              "name": "MustafaX",
-              "level": 4,
-              "bypassesPlayerLimit": true
-            },
-            {
-              "uuid": "00000000-0000-0000-0000-000000000002",
-              "name": "muhammad12000",
-              "level": 4,
-              "bypassesPlayerLimit": true
-            },
-            {
-              "uuid": "00000000-0000-0000-0000-000000000003",
-              "name": "AbbasMaster",
-              "level": 4,
-              "bypassesPlayerLimit": true
-            }
-          ]
-          OPS
-          echo "ops.json created!"
 
       - name: Install and connect Playit automatically
         env:
@@ -109,28 +83,19 @@ jobs:
           
           echo "========================================="
           echo "  Playit Status:"
-          cat playit.log
+          cat playit.log | tail -10
           echo "========================================="
-          
-          if grep -q "connected" playit.log 2>/dev/null; then
-            echo "SUCCESS: Playit connected automatically!"
-          elif grep -q "claim" playit.log 2>/dev/null; then
-            CLAIM_URL=$(grep -o "https://playit.gg/claim/[a-zA-Z0-9]*" playit.log | head -1)
-            echo "========================================="
-            echo "  OPEN THIS URL AND PRESS CLAIM:"
-            echo "  $CLAIM_URL"
-            echo "========================================="
-            sleep 60
-          fi
 
-      - name: Start Minecraft Server
+      - name: Start Minecraft Server and set admins
         run: |
           echo "========================================="
           echo "  Starting Minecraft Server..."
           echo "  Forge 1.19.2-43.3.5 | RAM: 4GB"
           echo "========================================="
 
-          java -Xmx4G -Xms4G \
+          mkfifo /tmp/mc_input
+          
+          tail -f /tmp/mc_input | java -Xmx4G -Xms4G \
             -XX:+UseG1GC \
             -XX:+ParallelRefProcEnabled \
             -XX:MaxGCPauseMillis=200 \
@@ -146,33 +111,55 @@ jobs:
             -XX:+PerfDisableSharedMem \
             -XX:MaxTenuringThreshold=1 \
             -Dlog4j2.formatMsgNoLookups=true \
-            @libraries/net/minecraftforge/forge/1.19.2-43.3.5/unix_args.txt nogui &
+            @libraries/net/minecraftforge/forge/1.19.2-43.3.5/unix_args.txt nogui > server_output.log 2>&1 &
 
           MC_PID=$!
+          echo "Server PID: $MC_PID"
           echo "Waiting for server to start..."
 
           TIMEOUT=600
           ELAPSED=0
-          while ! grep -q "Done" logs/latest.log 2>/dev/null; do
+          while ! grep -q "Done" server_output.log 2>/dev/null; do
             sleep 10
             ELAPSED=$((ELAPSED + 10))
             echo "Loading mods... ($ELAPSED seconds)"
             if [ $ELAPSED -ge $TIMEOUT ]; then
               echo "Server took too long!"
-              cat logs/latest.log 2>/dev/null | tail -50
+              cat server_output.log 2>/dev/null | tail -50
               exit 1
             fi
           done
 
           echo "========================================="
           echo "  SERVER IS RUNNING!"
-          echo "  Go to playit.gg/account/tunnels"
-          echo "  Copy your fixed server address"
+          echo "  Setting up admins..."
+          echo "========================================="
+          
+          sleep 5
+          
+          echo "op MustafaX" > /tmp/mc_input
+          sleep 2
+          echo "op muhammad12000" > /tmp/mc_input
+          sleep 2
+          echo "op AbbasMaster" > /tmp/mc_input
+          sleep 2
+          
+          echo "========================================="
+          echo "  ADMINS SET SUCCESSFULLY!"
+          echo "  MustafaX = Admin"
+          echo "  muhammad12000 = Admin"
+          echo "  AbbasMaster = Admin"
+          echo "========================================="
+          echo ""
+          echo "  Server address:"
+          echo "  economic-acts.gl.joinmc.link"
+          echo ""
           echo "========================================="
 
           while kill -0 $MC_PID 2>/dev/null; do
             sleep 300
             echo "Auto-saving world..."
+            echo "save-all" > /tmp/mc_input
           done
 
       - name: Save world
