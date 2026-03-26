@@ -20,6 +20,9 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      - name: Install screen
+        run: sudo apt-get install -y screen
+
       - name: Restore world from cache
         uses: actions/cache/restore@v4
         with:
@@ -61,6 +64,8 @@ jobs:
           online-mode=false
           spawn-protection=0
           enable-command-block=true
+          op-permission-level=4
+          function-permission-level=4
           PROPS
 
       - name: Install and connect Playit automatically
@@ -71,7 +76,6 @@ jobs:
           curl -L -o playit https://github.com/playit-cloud/playit-agent/releases/download/v0.15.26/playit-linux-amd64
           chmod +x playit
           
-          echo "Creating Playit config with secret key..."
           cat > playit.toml << EOF
           secret_key = "$PLAYIT_SECRET"
           EOF
@@ -86,16 +90,14 @@ jobs:
           cat playit.log | tail -10
           echo "========================================="
 
-      - name: Start Minecraft Server and set admins
+      - name: Start Minecraft Server
         run: |
           echo "========================================="
           echo "  Starting Minecraft Server..."
           echo "  Forge 1.19.2-43.3.5 | RAM: 4GB"
           echo "========================================="
 
-          mkfifo /tmp/mc_input
-          
-          tail -f /tmp/mc_input | java -Xmx4G -Xms4G \
+          screen -dmS mc java -Xmx4G -Xms4G \
             -XX:+UseG1GC \
             -XX:+ParallelRefProcEnabled \
             -XX:MaxGCPauseMillis=200 \
@@ -111,55 +113,54 @@ jobs:
             -XX:+PerfDisableSharedMem \
             -XX:MaxTenuringThreshold=1 \
             -Dlog4j2.formatMsgNoLookups=true \
-            @libraries/net/minecraftforge/forge/1.19.2-43.3.5/unix_args.txt nogui > server_output.log 2>&1 &
-
-          MC_PID=$!
-          echo "Server PID: $MC_PID"
+            @libraries/net/minecraftforge/forge/1.19.2-43.3.5/unix_args.txt nogui
+          
           echo "Waiting for server to start..."
 
           TIMEOUT=600
           ELAPSED=0
-          while ! grep -q "Done" server_output.log 2>/dev/null; do
+          while ! grep -q "Done" logs/latest.log 2>/dev/null; do
             sleep 10
             ELAPSED=$((ELAPSED + 10))
             echo "Loading mods... ($ELAPSED seconds)"
             if [ $ELAPSED -ge $TIMEOUT ]; then
               echo "Server took too long!"
-              cat server_output.log 2>/dev/null | tail -50
+              cat logs/latest.log 2>/dev/null | tail -50
               exit 1
             fi
           done
 
           echo "========================================="
           echo "  SERVER IS RUNNING!"
-          echo "  Setting up admins..."
+          echo "  Now setting admins..."
           echo "========================================="
           
-          sleep 5
+          sleep 10
           
-          echo "op MustafaX" > /tmp/mc_input
-          sleep 2
-          echo "op muhammad12000" > /tmp/mc_input
-          sleep 2
-          echo "op AbbasMaster" > /tmp/mc_input
-          sleep 2
+          screen -S mc -X stuff "op MustafaX$(printf '\r')"
+          sleep 3
+          screen -S mc -X stuff "op muhammad12000$(printf '\r')"
+          sleep 3
+          screen -S mc -X stuff "op AbbasMaster$(printf '\r')"
+          sleep 3
+          
+          echo "Checking ops.json..."
+          cat ops.json 2>/dev/null || echo "ops.json not created yet"
           
           echo "========================================="
-          echo "  ADMINS SET SUCCESSFULLY!"
+          echo "  ADMINS HAVE BEEN SET!"
           echo "  MustafaX = Admin"
           echo "  muhammad12000 = Admin"
           echo "  AbbasMaster = Admin"
-          echo "========================================="
           echo ""
           echo "  Server address:"
           echo "  economic-acts.gl.joinmc.link"
-          echo ""
           echo "========================================="
 
-          while kill -0 $MC_PID 2>/dev/null; do
+          while screen -list | grep -q mc; do
             sleep 300
             echo "Auto-saving world..."
-            echo "save-all" > /tmp/mc_input
+            screen -S mc -X stuff "save-all$(printf '\r')"
           done
 
       - name: Save world
