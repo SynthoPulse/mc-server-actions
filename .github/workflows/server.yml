@@ -7,7 +7,7 @@ on:
 
 concurrency:
   group: minecraft-server
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   server:
@@ -17,6 +17,8 @@ jobs:
     steps:
       - name: Checkout repository files
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Java 17
         uses: actions/setup-java@v4
@@ -24,23 +26,28 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Install screen
-        run: sudo apt-get install -y screen
+      - name: Install screen and git
+        run: |
+          sudo apt-get install -y screen git
+          git config --global user.email "server@minecraft.com"
+          git config --global user.name "Minecraft Server"
 
-      - name: Restore world from cache
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            world
-            world_nether
-            world_the_end
-            banned-players.json
-            banned-ips.json
-            ops.json
-            whitelist.json
-          key: mc-world-save
-          restore-keys: |
-            mc-world-
+      - name: Download world save from repository
+        run: |
+          echo "Checking for saved world..."
+          if [ -d "world_save/world" ]; then
+            echo "Found saved world! Restoring..."
+            cp -r world_save/world . 2>/dev/null || true
+            cp -r world_save/world_nether . 2>/dev/null || true
+            cp -r world_save/world_the_end . 2>/dev/null || true
+            cp world_save/ops.json . 2>/dev/null || true
+            cp world_save/banned-players.json . 2>/dev/null || true
+            cp world_save/banned-ips.json . 2>/dev/null || true
+            cp world_save/whitelist.json . 2>/dev/null || true
+            echo "World restored successfully!"
+          else
+            echo "No saved world found. Starting fresh world."
+          fi
 
       - name: Download and install Forge
         run: |
@@ -61,7 +68,7 @@ jobs:
           difficulty=hard
           max-players=5
           view-distance=5
-          simulation-distance=4
+          simulation-distance=5
           allow-flight=true
           pvp=false
           motd=SynthoPulse Server
@@ -91,14 +98,13 @@ jobs:
           
           echo "========================================="
           echo "  Playit Status:"
-          cat playit.log | tail -10
+          cat playit.log | tail -5
           echo "========================================="
 
       - name: Start Minecraft Server
         run: |
           echo "========================================="
           echo "  Starting Minecraft Server..."
-          echo "  Forge 1.19.2-43.3.5 | RAM: 4GB"
           echo "========================================="
 
           screen -dmS mc java -Xmx4G -Xms4G \
@@ -118,7 +124,7 @@ jobs:
             -XX:MaxTenuringThreshold=1 \
             -Dlog4j2.formatMsgNoLookups=true \
             @libraries/net/minecraftforge/forge/1.19.2-43.3.5/unix_args.txt nogui
-          
+
           echo "Waiting for server to start..."
 
           TIMEOUT=600
@@ -136,11 +142,10 @@ jobs:
 
           echo "========================================="
           echo "  SERVER IS RUNNING!"
-          echo "  Setting up admins..."
+          echo "  Setting admins..."
           echo "========================================="
           
           sleep 10
-          
           screen -S mc -X stuff "op MustafaX$(printf '\r')"
           sleep 3
           screen -S mc -X stuff "op muhammad12000$(printf '\r')"
@@ -148,40 +153,69 @@ jobs:
           screen -S mc -X stuff "op AbbasMaster$(printf '\r')"
           sleep 3
           
-          echo "========================================="
-          echo "  ADMINS SET!"
-          echo "  MustafaX = Admin"
-          echo "  muhammad12000 = Admin"
-          echo "  AbbasMaster = Admin"
-          echo ""
-          echo "  Server address:"
-          echo "  economic-acts.gl.joinmc.link"
-          echo "========================================="
+          echo "  MustafaX = Admin ✅"
+          echo "  muhammad12000 = Admin ✅"
+          echo "  AbbasMaster = Admin ✅"
+          echo "  Address: economic-acts.gl.joinmc.link"
 
-      - name: Keep server running and auto-save
+      - name: Keep alive and save world every 5 minutes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "Server is running. Auto-saving every 5 minutes..."
+          SAVE_COUNT=0
           
           while screen -list | grep -q mc; do
             sleep 300
-            echo "Saving world..."
+            
+            echo "Auto-saving world... (Save #$SAVE_COUNT)"
             screen -S mc -X stuff "save-all$(printf '\r')"
-            sleep 5
-            echo "World saved at $(date)"
+            sleep 10
+            
+            echo "Pushing world to GitHub..."
+            mkdir -p world_save
+            
+            cp -r world world_save/ 2>/dev/null || true
+            cp -r world_nether world_save/ 2>/dev/null || true
+            cp -r world_the_end world_save/ 2>/dev/null || true
+            cp ops.json world_save/ 2>/dev/null || true
+            cp banned-players.json world_save/ 2>/dev/null || true
+            cp banned-ips.json world_save/ 2>/dev/null || true
+            cp whitelist.json world_save/ 2>/dev/null || true
+            
+            cd world_save
+            git add -A
+            git diff --cached --quiet || git commit -m "Auto save - $(date '+%Y-%m-%d %H:%M:%S')"
+            git push origin main 2>/dev/null || true
+            cd ..
+            
+            SAVE_COUNT=$((SAVE_COUNT + 1))
+            echo "World saved and pushed! (Save #$SAVE_COUNT)"
           done
           
-          echo "Server stopped."
+          echo "Server stopped. Doing final save..."
 
-      - name: Save world
+      - name: Final world save before shutdown
         if: always()
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            world
-            world_nether
-            world_the_end
-            banned-players.json
-            banned-ips.json
-            ops.json
-            whitelist.json
-          key: mc-world-save-${{ github.run_number }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Doing final save..."
+          screen -S mc -X stuff "save-all$(printf '\r')" 2>/dev/null || true
+          sleep 15
+          
+          mkdir -p world_save
+          cp -r world world_save/ 2>/dev/null || true
+          cp -r world_nether world_save/ 2>/dev/null || true
+          cp -r world_the_end world_save/ 2>/dev/null || true
+          cp ops.json world_save/ 2>/dev/null || true
+          cp banned-players.json world_save/ 2>/dev/null || true
+          cp banned-ips.json world_save/ 2>/dev/null || true
+          cp whitelist.json world_save/ 2>/dev/null || true
+          
+          cd world_save
+          git add -A
+          git diff --cached --quiet || git commit -m "Final save - $(date '+%Y-%m-%d %H:%M:%S')"
+          git push origin main 2>/dev/null || true
+          cd ..
+          
+          echo "Final save completed!"
