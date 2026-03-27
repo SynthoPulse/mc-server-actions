@@ -1,3 +1,6 @@
 #List of curio slot type settings
 curiosSettings = []
 
+[server]
+	keep_curios_on_death = true
+	drop_curios_on_death = false
