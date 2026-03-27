@@ -17,8 +17,6 @@ jobs:
     steps:
       - name: Checkout repository files
         uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Java 17
         uses: actions/setup-java@v4
@@ -26,28 +24,23 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Install screen and git
-        run: |
-          sudo apt-get install -y screen git
-          git config --global user.email "server@minecraft.com"
-          git config --global user.name "Minecraft Server"
+      - name: Install screen
+        run: sudo apt-get install -y screen
 
-      - name: Download world save from repository
-        run: |
-          echo "Checking for saved world..."
-          if [ -d "world_save/world" ]; then
-            echo "Found saved world! Restoring..."
-            cp -r world_save/world . 2>/dev/null || true
-            cp -r world_save/world_nether . 2>/dev/null || true
-            cp -r world_save/world_the_end . 2>/dev/null || true
-            cp world_save/ops.json . 2>/dev/null || true
-            cp world_save/banned-players.json . 2>/dev/null || true
-            cp world_save/banned-ips.json . 2>/dev/null || true
-            cp world_save/whitelist.json . 2>/dev/null || true
-            echo "World restored successfully!"
-          else
-            echo "No saved world found. Starting fresh world."
-          fi
+      - name: Restore world from cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            world
+            world_nether
+            world_the_end
+            banned-players.json
+            banned-ips.json
+            ops.json
+            whitelist.json
+          key: mc-world-save-28
+          restore-keys: |
+            mc-world-save-
 
       - name: Download and install Forge
         run: |
@@ -153,69 +146,32 @@ jobs:
           screen -S mc -X stuff "op AbbasMaster$(printf '\r')"
           sleep 3
           
-          echo "  MustafaX = Admin ✅"
-          echo "  muhammad12000 = Admin ✅"
-          echo "  AbbasMaster = Admin ✅"
+          echo "  Admins set successfully!"
           echo "  Address: economic-acts.gl.joinmc.link"
 
-      - name: Keep alive and save world every 5 minutes
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Keep alive and auto-save every 5 minutes
         run: |
           SAVE_COUNT=0
-          
           while screen -list | grep -q mc; do
             sleep 300
-            
+            SAVE_COUNT=$((SAVE_COUNT + 1))
             echo "Auto-saving world... (Save #$SAVE_COUNT)"
             screen -S mc -X stuff "save-all$(printf '\r')"
             sleep 10
-            
-            echo "Pushing world to GitHub..."
-            mkdir -p world_save
-            
-            cp -r world world_save/ 2>/dev/null || true
-            cp -r world_nether world_save/ 2>/dev/null || true
-            cp -r world_the_end world_save/ 2>/dev/null || true
-            cp ops.json world_save/ 2>/dev/null || true
-            cp banned-players.json world_save/ 2>/dev/null || true
-            cp banned-ips.json world_save/ 2>/dev/null || true
-            cp whitelist.json world_save/ 2>/dev/null || true
-            
-            cd world_save
-            git add -A
-            git diff --cached --quiet || git commit -m "Auto save - $(date '+%Y-%m-%d %H:%M:%S')"
-            git push origin main 2>/dev/null || true
-            cd ..
-            
-            SAVE_COUNT=$((SAVE_COUNT + 1))
-            echo "World saved and pushed! (Save #$SAVE_COUNT)"
+            echo "World saved at $(date)"
           done
-          
-          echo "Server stopped. Doing final save..."
+          echo "Server stopped."
 
-      - name: Final world save before shutdown
+      - name: Save world to cache
         if: always()
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          echo "Doing final save..."
-          screen -S mc -X stuff "save-all$(printf '\r')" 2>/dev/null || true
-          sleep 15
-          
-          mkdir -p world_save
-          cp -r world world_save/ 2>/dev/null || true
-          cp -r world_nether world_save/ 2>/dev/null || true
-          cp -r world_the_end world_save/ 2>/dev/null || true
-          cp ops.json world_save/ 2>/dev/null || true
-          cp banned-players.json world_save/ 2>/dev/null || true
-          cp banned-ips.json world_save/ 2>/dev/null || true
-          cp whitelist.json world_save/ 2>/dev/null || true
-          
-          cd world_save
-          git add -A
-          git diff --cached --quiet || git commit -m "Final save - $(date '+%Y-%m-%d %H:%M:%S')"
-          git push origin main 2>/dev/null || true
-          cd ..
-          
-          echo "Final save completed!"
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            world
+            world_nether
+            world_the_end
+            banned-players.json
+            banned-ips.json
+            ops.json
+            whitelist.json
+          key: mc-world-save-${{ github.run_number }}
