@@ -5,6 +5,10 @@ on:
   schedule:
     - cron: '0 */6 * * *'
 
+concurrency:
+  group: minecraft-server
+  cancel-in-progress: true
+
 jobs:
   server:
     runs-on: ubuntu-latest
@@ -54,10 +58,10 @@ jobs:
           cat > server.properties << 'PROPS'
           server-port=25565
           gamemode=survival
-          difficulty=hard
-          max-players=3
-          view-distance=5
-          simulation-distance=5
+          difficulty=normal
+          max-players=5
+          view-distance=6
+          simulation-distance=4
           allow-flight=true
           pvp=false
           motd=SynthoPulse Server
@@ -132,7 +136,7 @@ jobs:
 
           echo "========================================="
           echo "  SERVER IS RUNNING!"
-          echo "  Now setting admins..."
+          echo "  Setting up admins..."
           echo "========================================="
           
           sleep 10
@@ -144,11 +148,8 @@ jobs:
           screen -S mc -X stuff "op AbbasMaster$(printf '\r')"
           sleep 3
           
-          echo "Checking ops.json..."
-          cat ops.json 2>/dev/null || echo "ops.json not created yet"
-          
           echo "========================================="
-          echo "  ADMINS HAVE BEEN SET!"
+          echo "  ADMINS SET!"
           echo "  MustafaX = Admin"
           echo "  muhammad12000 = Admin"
           echo "  AbbasMaster = Admin"
@@ -157,11 +158,19 @@ jobs:
           echo "  economic-acts.gl.joinmc.link"
           echo "========================================="
 
+      - name: Keep server running and auto-save
+        run: |
+          echo "Server is running. Auto-saving every 5 minutes..."
+          
           while screen -list | grep -q mc; do
             sleep 300
-            echo "Auto-saving world..."
+            echo "Saving world..."
             screen -S mc -X stuff "save-all$(printf '\r')"
+            sleep 5
+            echo "World saved at $(date)"
           done
+          
+          echo "Server stopped."
 
       - name: Save world
         if: always()
