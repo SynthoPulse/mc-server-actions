@@ -2,8 +2,6 @@ name: Minecraft Server
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '0 */6 * * *'
 
 concurrency:
   group: minecraft-server
@@ -12,7 +10,7 @@ concurrency:
 jobs:
   server:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 350
 
     steps:
       - name: Checkout repository files
@@ -27,7 +25,7 @@ jobs:
       - name: Install screen
         run: sudo apt-get install -y screen
 
-      - name: Restore world from cache
+      - name: Restore world from latest save
         uses: actions/cache/restore@v4
         with:
           path: |
@@ -38,20 +36,25 @@ jobs:
             banned-ips.json
             ops.json
             whitelist.json
-          key: mc-world-save
+          key: mc-world-save-latest
           restore-keys: |
-            mc-world-
+            mc-world-save-
+
+      - name: Check restored world
+        run: |
+          if [ -d "world" ]; then
+            echo "World restored! Size: $(du -sh world/ | cut -f1)"
+          else
+            echo "No world found. Fresh start."
+          fi
 
       - name: Download and install Forge
         run: |
-          echo "Downloading Forge 1.19.2-43.3.5..."
           wget -q https://maven.minecraftforge.net/net/minecraftforge/forge/1.19.2-43.3.5/forge-1.19.2-43.3.5-installer.jar
-          echo "Installing Forge server..."
           java -jar forge-1.19.2-43.3.5-installer.jar --installServer
           rm forge-1.19.2-43.3.5-installer.jar
           rm forge-1.19.2-43.3.5-installer.jar.log 2>/dev/null || true
           echo "eula=true" > eula.txt
-          echo "Forge installed!"
 
       - name: Configure server
         run: |
@@ -61,7 +64,7 @@ jobs:
           difficulty=hard
           max-players=5
           view-distance=5
-          simulation-distance=4
+          simulation-distance=5
           allow-flight=true
           pvp=false
           motd=SynthoPulse Server
@@ -72,35 +75,22 @@ jobs:
           function-permission-level=4
           PROPS
 
-      - name: Install and connect Playit automatically
+      - name: Install and connect Playit
         env:
           PLAYIT_SECRET: ${{ secrets.PLAYIT_SECRET }}
         run: |
-          echo "Downloading Playit..."
           curl -L -o playit https://github.com/playit-cloud/playit-agent/releases/download/v0.15.26/playit-linux-amd64
           chmod +x playit
-          
           cat > playit.toml << EOF
           secret_key = "$PLAYIT_SECRET"
           EOF
-          
-          echo "Starting Playit..."
           PLAYIT_SECRET_KEY="$PLAYIT_SECRET" ./playit > playit.log 2>&1 &
-          
           sleep 30
-          
-          echo "========================================="
-          echo "  Playit Status:"
-          cat playit.log | tail -10
-          echo "========================================="
+          cat playit.log | tail -5
 
       - name: Start Minecraft Server
         run: |
-          echo "========================================="
-          echo "  Starting Minecraft Server..."
-          echo "  Forge 1.19.2-43.3.5 | RAM: 4GB"
-          echo "========================================="
-
+          echo "Starting server..."
           screen -dmS mc java -Xmx4G -Xms4G \
             -XX:+UseG1GC \
             -XX:+ParallelRefProcEnabled \
@@ -119,8 +109,6 @@ jobs:
             -Dlog4j2.formatMsgNoLookups=true \
             @libraries/net/minecraftforge/forge/1.19.2-43.3.5/unix_args.txt nogui
           
-          echo "Waiting for server to start..."
-
           TIMEOUT=600
           ELAPSED=0
           while ! grep -q "Done" logs/latest.log 2>/dev/null; do
@@ -129,50 +117,64 @@ jobs:
             echo "Loading mods... ($ELAPSED seconds)"
             if [ $ELAPSED -ge $TIMEOUT ]; then
               echo "Server took too long!"
-              cat logs/latest.log 2>/dev/null | tail -50
               exit 1
             fi
           done
-
+          
           echo "========================================="
           echo "  SERVER IS RUNNING!"
-          echo "  Setting up admins..."
+          echo "  Address: economic-acts.gl.joinmc.link"
           echo "========================================="
           
           sleep 10
-          
           screen -S mc -X stuff "op MustafaX$(printf '\r')"
           sleep 3
           screen -S mc -X stuff "op muhammad12000$(printf '\r')"
           sleep 3
           screen -S mc -X stuff "op AbbasMaster$(printf '\r')"
           sleep 3
-          
-          echo "========================================="
-          echo "  ADMINS SET!"
-          echo "  MustafaX = Admin"
-          echo "  muhammad12000 = Admin"
-          echo "  AbbasMaster = Admin"
-          echo ""
-          echo "  Server address:"
-          echo "  economic-acts.gl.joinmc.link"
-          echo "========================================="
+          echo "Admins set!"
 
       - name: Keep server running and auto-save
         run: |
-          echo "Server is running. Auto-saving every 5 minutes..."
+          echo "Server running. Auto-saving every 5 minutes."
+          echo "Max runtime: 5 hours 45 minutes."
           
-          while screen -list | grep -q mc; do
+          TOTAL=0
+          
+          while screen -list | grep -q "mc"; do
             sleep 300
-            echo "Saving world..."
+            TOTAL=$((TOTAL + 300))
+            
+            H=$((TOTAL / 3600))
+            M=$(( (TOTAL % 3600) / 60 ))
+            echo "Saving... (${H}h ${M}m)"
+            
             screen -S mc -X stuff "save-all$(printf '\r')"
-            sleep 5
-            echo "World saved at $(date)"
+            
+            if [ $TOTAL -ge 20700 ]; then
+              echo "5h 45m reached. Stopping..."
+              screen -S mc -X stuff "save-all$(printf '\r')"
+              sleep 15
+              screen -S mc -X stuff "stop$(printf '\r')"
+              sleep 30
+              break
+            fi
           done
           
-          echo "Server stopped."
+          echo "Server stopped safely."
 
-      - name: Save world
+      - name: Delete old caches
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh cache list --json id,key -q '.[] | select(.key | startswith("mc-world-save-")) | .id' | while read id; do
+            gh cache delete "$id" 2>/dev/null || true
+          done
+          echo "Old caches deleted!"
+
+      - name: Save world to cache
         if: always()
         uses: actions/cache/save@v4
         with:
@@ -184,4 +186,4 @@ jobs:
             banned-ips.json
             ops.json
             whitelist.json
-          key: mc-world-save-${{ github.run_number }}
+          key: mc-world-save-latest
