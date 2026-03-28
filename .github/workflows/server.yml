@@ -25,7 +25,7 @@ jobs:
       - name: Install screen
         run: sudo apt-get install -y screen
 
-      - name: Restore world from save 28
+      - name: Restore world
         uses: actions/cache/restore@v4
         with:
           path: |
@@ -36,7 +36,7 @@ jobs:
             banned-ips.json
             ops.json
             whitelist.json
-          key: mc-world-save-28
+          key: mc-world-save-latest
           restore-keys: |
             mc-world-save-
 
