@@ -2,17 +2,15 @@ name: Minecraft Server
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '0 */6 * * *'
 
 concurrency:
   group: minecraft-server
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   server:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 350
 
     steps:
       - name: Checkout repository files
@@ -23,9 +21,6 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
-
-      - name: Install screen
-        run: sudo apt-get install -y screen
 
       - name: Restore world from cache
         uses: actions/cache/restore@v4
@@ -38,9 +33,18 @@ jobs:
             banned-ips.json
             ops.json
             whitelist.json
-          key: mc-world-save-28
+          key: mc-world-save-9999
           restore-keys: |
             mc-world-save-
+
+      - name: Check restored world
+        run: |
+          if [ -d "world" ]; then
+            echo "World restored successfully!"
+            ls -la world/
+          else
+            echo "No world found. Starting fresh."
+          fi
 
       - name: Download and install Forge
         run: |
@@ -72,35 +76,26 @@ jobs:
           function-permission-level=4
           PROPS
 
-      - name: Install and connect Playit automatically
+      - name: Install and connect Playit
         env:
           PLAYIT_SECRET: ${{ secrets.PLAYIT_SECRET }}
         run: |
           echo "Downloading Playit..."
           curl -L -o playit https://github.com/playit-cloud/playit-agent/releases/download/v0.15.26/playit-linux-amd64
           chmod +x playit
-          
           cat > playit.toml << EOF
           secret_key = "$PLAYIT_SECRET"
           EOF
-          
-          echo "Starting Playit..."
           PLAYIT_SECRET_KEY="$PLAYIT_SECRET" ./playit > playit.log 2>&1 &
-          
           sleep 30
-          
-          echo "========================================="
-          echo "  Playit Status:"
+          echo "Playit Status:"
           cat playit.log | tail -5
-          echo "========================================="
 
-      - name: Start Minecraft Server
+      - name: Start server and keep running
         run: |
-          echo "========================================="
-          echo "  Starting Minecraft Server..."
-          echo "========================================="
-
-          screen -dmS mc java -Xmx4G -Xms4G \
+          echo "Starting Minecraft Server..."
+          
+          java -Xmx4G -Xms4G \
             -XX:+UseG1GC \
             -XX:+ParallelRefProcEnabled \
             -XX:MaxGCPauseMillis=200 \
@@ -116,10 +111,12 @@ jobs:
             -XX:+PerfDisableSharedMem \
             -XX:MaxTenuringThreshold=1 \
             -Dlog4j2.formatMsgNoLookups=true \
-            @libraries/net/minecraftforge/forge/1.19.2-43.3.5/unix_args.txt nogui
-
+            @libraries/net/minecraftforge/forge/1.19.2-43.3.5/unix_args.txt nogui &
+          
+          MC_PID=$!
+          echo "Server PID: $MC_PID"
           echo "Waiting for server to start..."
-
+          
           TIMEOUT=600
           ELAPSED=0
           while ! grep -q "Done" logs/latest.log 2>/dev/null; do
@@ -129,38 +126,54 @@ jobs:
             if [ $ELAPSED -ge $TIMEOUT ]; then
               echo "Server took too long!"
               cat logs/latest.log 2>/dev/null | tail -50
+              kill $MC_PID 2>/dev/null
               exit 1
             fi
           done
-
+          
           echo "========================================="
           echo "  SERVER IS RUNNING!"
-          echo "  Setting admins..."
+          echo "  Address: economic-acts.gl.joinmc.link"
           echo "========================================="
           
-          sleep 10
-          screen -S mc -X stuff "op MustafaX$(printf '\r')"
-          sleep 3
-          screen -S mc -X stuff "op muhammad12000$(printf '\r')"
-          sleep 3
-          screen -S mc -X stuff "op AbbasMaster$(printf '\r')"
-          sleep 3
+          echo "Setting admins..."
+          sleep 5
           
-          echo "  Admins set successfully!"
-          echo "  Address: economic-acts.gl.joinmc.link"
-
-      - name: Keep alive and auto-save every 5 minutes
-        run: |
-          SAVE_COUNT=0
-          while screen -list | grep -q mc; do
+          echo "op MustafaX" >> /proc/$MC_PID/fd/0 2>/dev/null || true
+          echo "op muhammad12000" >> /proc/$MC_PID/fd/0 2>/dev/null || true
+          echo "op AbbasMaster" >> /proc/$MC_PID/fd/0 2>/dev/null || true
+          
+          echo "Server running. Auto-saving every 5 minutes..."
+          echo "Server will run for maximum 5 hours 45 minutes then save and stop."
+          
+          MAX_RUNTIME=20700
+          ELAPSED=0
+          
+          while kill -0 $MC_PID 2>/dev/null; do
             sleep 300
-            SAVE_COUNT=$((SAVE_COUNT + 1))
-            echo "Auto-saving world... (Save #$SAVE_COUNT)"
-            screen -S mc -X stuff "save-all$(printf '\r')"
-            sleep 10
-            echo "World saved at $(date)"
+            ELAPSED=$((ELAPSED + 300))
+            
+            HOURS=$((ELAPSED / 3600))
+            MINUTES=$(((ELAPSED % 3600) / 60))
+            echo "Auto-saving... (Running for ${HOURS}h ${MINUTES}m)"
+            
+            echo "save-all" >> /proc/$MC_PID/fd/0 2>/dev/null || true
+            sleep 5
+            
+            if [ $ELAPSED -ge $MAX_RUNTIME ]; then
+              echo "========================================="
+              echo "  5h 45m reached. Stopping server safely..."
+              echo "========================================="
+              echo "save-all" >> /proc/$MC_PID/fd/0 2>/dev/null || true
+              sleep 10
+              echo "stop" >> /proc/$MC_PID/fd/0 2>/dev/null || true
+              sleep 30
+              kill $MC_PID 2>/dev/null || true
+              break
+            fi
           done
-          echo "Server stopped."
+          
+          echo "Server stopped. Ready for cache save."
 
       - name: Save world to cache
         if: always()
