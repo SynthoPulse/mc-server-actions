@@ -32,9 +32,9 @@ jobs:
             world
             world_nether
             world_the_end
-            ops.json
             banned-players.json
             banned-ips.json
+            ops.json
             whitelist.json
           key: mc-world-save-28
           restore-keys: |
@@ -43,9 +43,10 @@ jobs:
       - name: Check world
         run: |
           if [ -d "world" ]; then
-            echo "✅ World restored! Size: $(du -sh world/ | cut -f1)"
+            SIZE=$(du -sh world/ | cut -f1)
+            echo "✅ World restored! Size: $SIZE"
           else
-            echo "⚠️ No world found"
+            echo "❌ No world found"
           fi
 
       - name: Install Forge
@@ -106,14 +107,13 @@ jobs:
             -Dlog4j2.formatMsgNoLookups=true \
             @libraries/net/minecraftforge/forge/1.19.2-43.3.5/unix_args.txt nogui
 
-          echo "Waiting for server..."
           TIMEOUT=600
           ELAPSED=0
           while ! grep -q "Done" logs/latest.log 2>/dev/null; do
             sleep 10
             ELAPSED=$((ELAPSED + 10))
             if [ $ELAPSED -ge $TIMEOUT ]; then
-              echo "Server failed to start"
+              echo "Server failed"
               exit 1
             fi
           done
@@ -129,26 +129,20 @@ jobs:
           screen -S mc -X stuff "op muhammad12000$(printf '\r')"
           sleep 2
           screen -S mc -X stuff "op AbbasMaster$(printf '\r')"
-          echo "✅ Admins set!"
 
       - name: Keep Alive and Auto Save
         run: |
-          echo "✅ Server running. Saving every 5 minutes."
-          echo "⏱️ Max runtime: 5 hours 40 minutes"
-
           TOTAL=0
-
           while screen -list | grep -q mc; do
             sleep 300
             TOTAL=$((TOTAL + 300))
-
             H=$((TOTAL / 3600))
             M=$(( (TOTAL % 3600) / 60 ))
-            echo "💾 Auto saving... (${H}h ${M}m)"
+            echo "💾 Saving... (${H}h ${M}m)"
             screen -S mc -X stuff "save-all$(printf '\r')"
 
             if [ $TOTAL -ge 20400 ]; then
-              echo "⏱️ Time limit reached. Saving and stopping safely..."
+              echo "⏱️ Stopping safely..."
               screen -S mc -X stuff "save-all$(printf '\r')"
               sleep 15
               screen -S mc -X stuff "stop$(printf '\r')"
@@ -157,18 +151,30 @@ jobs:
             fi
           done
 
-          echo "✅ Server stopped safely."
+      - name: Check world before saving
+        if: always()
+        id: check
+        run: |
+          WORLD_SIZE=$(du -sb world 2>/dev/null | cut -f1 || echo "0")
+          echo "World size: $WORLD_SIZE bytes"
+          if [ "$WORLD_SIZE" -gt 1000000 ]; then
+            echo "✅ World is valid!"
+            echo "save=true" >> $GITHUB_OUTPUT
+          else
+            echo "❌ World is empty! NOT saving!"
+            echo "save=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: Save world to cache
-        if: always()
+        if: always() && steps.check.outputs.save == 'true'
         uses: actions/cache/save@v4
         with:
           path: |
             world
             world_nether
             world_the_end
-            ops.json
             banned-players.json
             banned-ips.json
+            ops.json
             whitelist.json
           key: mc-world-save-latest
