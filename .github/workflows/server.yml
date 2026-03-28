@@ -10,13 +10,13 @@ concurrency:
 jobs:
   server:
     runs-on: ubuntu-latest
-    timeout-minutes: 350
+    timeout-minutes: 350   # أقل من 6 ساعات بقليل
 
     steps:
-      - name: Checkout repository files
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Java 17
+      - name: Install Java & Screen
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
@@ -25,30 +25,22 @@ jobs:
       - name: Install screen
         run: sudo apt-get install -y screen
 
-      - name: Restore world from latest save
+      - name: Restore latest world
         uses: actions/cache/restore@v4
         with:
           path: |
             world
             world_nether
             world_the_end
+            ops.json
             banned-players.json
             banned-ips.json
-            ops.json
             whitelist.json
           key: mc-world-save-latest
           restore-keys: |
             mc-world-save-
 
-      - name: Check restored world
-        run: |
-          if [ -d "world" ]; then
-            echo "World restored! Size: $(du -sh world/ | cut -f1)"
-          else
-            echo "No world found. Fresh start."
-          fi
-
-      - name: Download and install Forge
+      - name: Install Forge
         run: |
           wget -q https://maven.minecraftforge.net/net/minecraftforge/forge/1.19.2-43.3.5/forge-1.19.2-43.3.5-installer.jar
           java -jar forge-1.19.2-43.3.5-installer.jar --installServer
@@ -56,9 +48,9 @@ jobs:
           rm forge-1.19.2-43.3.5-installer.jar.log 2>/dev/null || true
           echo "eula=true" > eula.txt
 
-      - name: Configure server
+      - name: Configure Server
         run: |
-          cat > server.properties << 'PROPS'
+          cat > server.properties << 'EOF'
           server-port=25565
           gamemode=survival
           difficulty=hard
@@ -67,30 +59,27 @@ jobs:
           simulation-distance=5
           allow-flight=true
           pvp=false
-          motd=SynthoPulse Server
           online-mode=false
           spawn-protection=0
           enable-command-block=true
           op-permission-level=4
           function-permission-level=4
-          PROPS
+          motd=SynthoPulse Server
+          EOF
 
-      - name: Install and connect Playit
+      - name: Start Playit
         env:
           PLAYIT_SECRET: ${{ secrets.PLAYIT_SECRET }}
         run: |
           curl -L -o playit https://github.com/playit-cloud/playit-agent/releases/download/v0.15.26/playit-linux-amd64
           chmod +x playit
-          cat > playit.toml << EOF
-          secret_key = "$PLAYIT_SECRET"
-          EOF
+          echo "secret_key = \"$PLAYIT_SECRET\"" > playit.toml
           PLAYIT_SECRET_KEY="$PLAYIT_SECRET" ./playit > playit.log 2>&1 &
-          sleep 30
+          sleep 20
           cat playit.log | tail -5
 
-      - name: Start Minecraft Server
+      - name: Start Server
         run: |
-          echo "Starting server..."
           screen -dmS mc java -Xmx4G -Xms4G \
             -XX:+UseG1GC \
             -XX:+ParallelRefProcEnabled \
@@ -108,73 +97,50 @@ jobs:
             -XX:MaxTenuringThreshold=1 \
             -Dlog4j2.formatMsgNoLookups=true \
             @libraries/net/minecraftforge/forge/1.19.2-43.3.5/unix_args.txt nogui
-          
+
+          echo "Waiting for server..."
           TIMEOUT=600
           ELAPSED=0
           while ! grep -q "Done" logs/latest.log 2>/dev/null; do
             sleep 10
             ELAPSED=$((ELAPSED + 10))
-            echo "Loading mods... ($ELAPSED seconds)"
             if [ $ELAPSED -ge $TIMEOUT ]; then
-              echo "Server took too long!"
+              echo "Server failed"
               exit 1
             fi
           done
-          
-          echo "========================================="
-          echo "  SERVER IS RUNNING!"
-          echo "  Address: economic-acts.gl.joinmc.link"
-          echo "========================================="
-          
+
+          echo "Server Running ✅"
+
+          # إعطاء الأدمن
           sleep 10
           screen -S mc -X stuff "op MustafaX$(printf '\r')"
-          sleep 3
+          sleep 2
           screen -S mc -X stuff "op muhammad12000$(printf '\r')"
-          sleep 3
+          sleep 2
           screen -S mc -X stuff "op AbbasMaster$(printf '\r')"
-          sleep 3
-          echo "Admins set!"
 
-      - name: Keep server running and auto-save
+      - name: Keep Alive + Auto Save
         run: |
-          echo "Server running. Auto-saving every 5 minutes."
-          echo "Max runtime: 5 hours 45 minutes."
-          
           TOTAL=0
-          
-          while screen -list | grep -q "mc"; do
+          while screen -list | grep -q mc; do
             sleep 300
             TOTAL=$((TOTAL + 300))
-            
-            H=$((TOTAL / 3600))
-            M=$(( (TOTAL % 3600) / 60 ))
-            echo "Saving... (${H}h ${M}m)"
-            
+            echo "Auto Saving..."
             screen -S mc -X stuff "save-all$(printf '\r')"
-            
-            if [ $TOTAL -ge 20700 ]; then
-              echo "5h 45m reached. Stopping..."
+
+            # قبل انتهاء الوقت بقليل نحفظ ونوقف بأمان
+            if [ $TOTAL -ge 20400 ]; then
+              echo "Final Save..."
               screen -S mc -X stuff "save-all$(printf '\r')"
-              sleep 15
+              sleep 10
               screen -S mc -X stuff "stop$(printf '\r')"
-              sleep 30
+              sleep 20
               break
             fi
           done
-          
-          echo "Server stopped safely."
 
-      - name: Delete old caches
-        if: always()
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh cache list --json id,key -q '.[] | select(.key | startswith("mc-world-save-")) | .id' | while read id; do
-            gh cache delete "$id" 2>/dev/null || true
-          done
-          echo "Old caches deleted!"
-
-      - name: Save world to cache
+      - name: Save World
         if: always()
         uses: actions/cache/save@v4
         with:
@@ -182,8 +148,8 @@ jobs:
             world
             world_nether
             world_the_end
+            ops.json
             banned-players.json
             banned-ips.json
-            ops.json
             whitelist.json
           key: mc-world-save-latest
