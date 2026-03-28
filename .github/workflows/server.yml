@@ -10,13 +10,13 @@ concurrency:
 jobs:
   server:
     runs-on: ubuntu-latest
-    timeout-minutes: 350   # أقل من 6 ساعات بقليل
+    timeout-minutes: 350
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Java & Screen
+      - name: Install Java
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
@@ -25,7 +25,7 @@ jobs:
       - name: Install screen
         run: sudo apt-get install -y screen
 
-      - name: Restore latest world
+      - name: Restore world from save 28
         uses: actions/cache/restore@v4
         with:
           path: |
@@ -36,9 +36,17 @@ jobs:
             banned-players.json
             banned-ips.json
             whitelist.json
-          key: mc-world-save-latest
+          key: mc-world-save-28
           restore-keys: |
             mc-world-save-
+
+      - name: Check world
+        run: |
+          if [ -d "world" ]; then
+            echo "✅ World restored! Size: $(du -sh world/ | cut -f1)"
+          else
+            echo "⚠️ No world found"
+          fi
 
       - name: Install Forge
         run: |
@@ -48,15 +56,15 @@ jobs:
           rm forge-1.19.2-43.3.5-installer.jar.log 2>/dev/null || true
           echo "eula=true" > eula.txt
 
-      - name: Configure Server
+      - name: Configure server
         run: |
           cat > server.properties << 'EOF'
           server-port=25565
           gamemode=survival
           difficulty=hard
           max-players=5
-          view-distance=5
-          simulation-distance=5
+          view-distance=6
+          simulation-distance=6
           allow-flight=true
           pvp=false
           online-mode=false
@@ -78,7 +86,7 @@ jobs:
           sleep 20
           cat playit.log | tail -5
 
-      - name: Start Server
+      - name: Start Minecraft Server
         run: |
           screen -dmS mc java -Xmx4G -Xms4G \
             -XX:+UseG1GC \
@@ -105,42 +113,53 @@ jobs:
             sleep 10
             ELAPSED=$((ELAPSED + 10))
             if [ $ELAPSED -ge $TIMEOUT ]; then
-              echo "Server failed"
+              echo "Server failed to start"
               exit 1
             fi
           done
 
-          echo "Server Running ✅"
+          echo "========================================="
+          echo "  ✅ SERVER IS RUNNING!"
+          echo "  Address: economic-acts.gl.joinmc.link"
+          echo "========================================="
 
-          # إعطاء الأدمن
           sleep 10
           screen -S mc -X stuff "op MustafaX$(printf '\r')"
           sleep 2
           screen -S mc -X stuff "op muhammad12000$(printf '\r')"
           sleep 2
           screen -S mc -X stuff "op AbbasMaster$(printf '\r')"
+          echo "✅ Admins set!"
 
-      - name: Keep Alive + Auto Save
+      - name: Keep Alive and Auto Save
         run: |
+          echo "✅ Server running. Saving every 5 minutes."
+          echo "⏱️ Max runtime: 5 hours 40 minutes"
+
           TOTAL=0
+
           while screen -list | grep -q mc; do
             sleep 300
             TOTAL=$((TOTAL + 300))
-            echo "Auto Saving..."
+
+            H=$((TOTAL / 3600))
+            M=$(( (TOTAL % 3600) / 60 ))
+            echo "💾 Auto saving... (${H}h ${M}m)"
             screen -S mc -X stuff "save-all$(printf '\r')"
 
-            # قبل انتهاء الوقت بقليل نحفظ ونوقف بأمان
             if [ $TOTAL -ge 20400 ]; then
-              echo "Final Save..."
+              echo "⏱️ Time limit reached. Saving and stopping safely..."
               screen -S mc -X stuff "save-all$(printf '\r')"
-              sleep 10
+              sleep 15
               screen -S mc -X stuff "stop$(printf '\r')"
-              sleep 20
+              sleep 30
               break
             fi
           done
 
-      - name: Save World
+          echo "✅ Server stopped safely."
+
+      - name: Save world to cache
         if: always()
         uses: actions/cache/save@v4
         with:
