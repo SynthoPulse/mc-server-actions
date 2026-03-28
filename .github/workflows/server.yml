@@ -16,11 +16,14 @@ jobs:
       - name: Checkout repository files
         uses: actions/checkout@v4
 
-      - name: Install Java 17
+      - name: Install Java 17 and screen
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
+
+      - name: Install screen
+        run: sudo apt-get install -y screen
 
       - name: Restore world from latest save
         uses: actions/cache/restore@v4
@@ -40,10 +43,10 @@ jobs:
       - name: Check restored world
         run: |
           if [ -d "world" ]; then
-            echo "✅ World restored successfully!"
-            echo "World size: $(du -sh world/ | cut -f1)"
+            echo "✅ World restored!"
+            echo "Size: $(du -sh world/ | cut -f1)"
           else
-            echo "⚠️ No world found. Starting fresh."
+            echo "⚠️ No world found. Fresh start."
           fi
 
       - name: Download and install Forge
@@ -59,10 +62,10 @@ jobs:
           cat > server.properties << 'PROPS'
           server-port=25565
           gamemode=survival
-          difficulty=normal
+          difficulty=hard
           max-players=5
-          view-distance=6
-          simulation-distance=4
+          view-distance=5
+          simulation-distance=5
           allow-flight=true
           pvp=false
           motd=SynthoPulse Server
@@ -84,14 +87,13 @@ jobs:
           EOF
           PLAYIT_SECRET_KEY="$PLAYIT_SECRET" ./playit > playit.log 2>&1 &
           sleep 30
-          echo "Playit Status:"
           cat playit.log | tail -5
 
-      - name: Start server with auto-shutdown
+      - name: Start Minecraft Server
         run: |
-          echo "Starting Minecraft Server..."
+          echo "Starting server with screen..."
           
-          java -Xmx4G -Xms4G \
+          screen -dmS mc java -Xmx4G -Xms4G \
             -XX:+UseG1GC \
             -XX:+ParallelRefProcEnabled \
             -XX:MaxGCPauseMillis=200 \
@@ -107,9 +109,7 @@ jobs:
             -XX:+PerfDisableSharedMem \
             -XX:MaxTenuringThreshold=1 \
             -Dlog4j2.formatMsgNoLookups=true \
-            @libraries/net/minecraftforge/forge/1.19.2-43.3.5/unix_args.txt nogui &
-          
-          MC_PID=$!
+            @libraries/net/minecraftforge/forge/1.19.2-43.3.5/unix_args.txt nogui
           
           TIMEOUT=600
           ELAPSED=0
@@ -119,7 +119,6 @@ jobs:
             echo "Loading mods... ($ELAPSED seconds)"
             if [ $ELAPSED -ge $TIMEOUT ]; then
               echo "Server took too long!"
-              kill $MC_PID 2>/dev/null
               exit 1
             fi
           done
@@ -129,31 +128,39 @@ jobs:
           echo "  Address: economic-acts.gl.joinmc.link"
           echo "========================================="
           
-          sleep 5
-          echo "op MustafaX" >> /proc/$MC_PID/fd/0 2>/dev/null || true
-          sleep 2
-          echo "op muhammad12000" >> /proc/$MC_PID/fd/0 2>/dev/null || true
-          sleep 2
-          echo "op AbbasMaster" >> /proc/$MC_PID/fd/0 2>/dev/null || true
-          
-          echo "Monitoring players. Server will stop after 10 min with 0 players."
+          sleep 10
+          screen -S mc -X stuff "op MustafaX$(printf '\r')"
+          sleep 3
+          screen -S mc -X stuff "op muhammad12000$(printf '\r')"
+          sleep 3
+          screen -S mc -X stuff "op AbbasMaster$(printf '\r')"
+
+      - name: Monitor players and auto-shutdown
+        run: |
+          echo "Monitoring players..."
+          echo "Server will stop after 10 min with 0 players"
+          echo "Max runtime: 5 hours 45 minutes"
           
           EMPTY_TIME=0
-          MAX_RUNTIME=20700
           TOTAL_TIME=0
           SAVE_TIMER=0
+          MAX_RUNTIME=20700
           
-          while kill -0 $MC_PID 2>/dev/null; do
+          while screen -list | grep -q mc; do
             sleep 30
             TOTAL_TIME=$((TOTAL_TIME + 30))
             SAVE_TIMER=$((SAVE_TIMER + 30))
             
-            PLAYER_COUNT=$(grep -c "joined the game" logs/latest.log 2>/dev/null || echo "0")
-            LEFT_COUNT=$(grep -c "left the game" logs/latest.log 2>/dev/null || echo "0")
-            ONLINE=$((PLAYER_COUNT - LEFT_COUNT))
+            PLAYER_LIST=$(grep "joined the game\|left the game" logs/latest.log 2>/dev/null | tail -20)
+            JOINED=$(echo "$PLAYER_LIST" | grep -c "joined the game" || echo "0")
+            LEFT=$(echo "$PLAYER_LIST" | grep -c "left the game" || echo "0")
+            ONLINE=$((JOINED - LEFT))
+            if [ "$ONLINE" -lt 0 ]; then ONLINE=0; fi
             
-            if [ "$ONLINE" -le 0 ]; then
+            if [ "$ONLINE" -eq 0 ]; then
               EMPTY_TIME=$((EMPTY_TIME + 30))
+              EMPTY_MIN=$((EMPTY_TIME / 60))
+              echo "No players online. Empty for ${EMPTY_MIN} minutes..."
             else
               EMPTY_TIME=0
             fi
@@ -162,46 +169,44 @@ jobs:
               SAVE_TIMER=0
               HOURS=$((TOTAL_TIME / 3600))
               MINUTES=$(((TOTAL_TIME % 3600) / 60))
-              echo "Auto-saving... (${HOURS}h ${MINUTES}m) Players online: $ONLINE"
-              echo "save-all" >> /proc/$MC_PID/fd/0 2>/dev/null || true
+              echo "Auto-saving... (${HOURS}h ${MINUTES}m) Players: $ONLINE"
+              screen -S mc -X stuff "save-all$(printf '\r')"
             fi
             
             if [ $EMPTY_TIME -ge 600 ]; then
               echo "========================================="
               echo "  No players for 10 minutes!"
-              echo "  Saving and stopping server..."
+              echo "  Saving and stopping..."
               echo "========================================="
-              echo "save-all" >> /proc/$MC_PID/fd/0 2>/dev/null || true
+              screen -S mc -X stuff "save-all$(printf '\r')"
               sleep 15
-              echo "stop" >> /proc/$MC_PID/fd/0 2>/dev/null || true
+              screen -S mc -X stuff "stop$(printf '\r')"
               sleep 30
-              kill $MC_PID 2>/dev/null || true
               break
             fi
             
             if [ $TOTAL_TIME -ge $MAX_RUNTIME ]; then
               echo "========================================="
               echo "  5h 45m reached!"
-              echo "  Saving and stopping server..."
+              echo "  Saving and stopping..."
               echo "========================================="
-              echo "save-all" >> /proc/$MC_PID/fd/0 2>/dev/null || true
+              screen -S mc -X stuff "save-all$(printf '\r')"
               sleep 15
-              echo "stop" >> /proc/$MC_PID/fd/0 2>/dev/null || true
+              screen -S mc -X stuff "stop$(printf '\r')"
               sleep 30
-              kill $MC_PID 2>/dev/null || true
               break
             fi
           done
           
           echo "Server stopped safely."
 
-      - name: Delete old cache
+      - name: Delete old caches
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "Deleting old caches..."
-          gh cache list --json id,key | jq -r '.[] | select(.key | startswith("mc-world-save-")) | .id' | while read id; do
+          gh cache list --json id,key -q '.[] | select(.key | startswith("mc-world-save-")) | .id' | while read id; do
             gh cache delete "$id" 2>/dev/null || true
           done
           echo "Old caches deleted!"
