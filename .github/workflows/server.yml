@@ -16,7 +16,7 @@ jobs:
       - name: Checkout repository files
         uses: actions/checkout@v4
 
-      - name: Install Java 17 and screen
+      - name: Install Java 17
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
@@ -43,10 +43,9 @@ jobs:
       - name: Check restored world
         run: |
           if [ -d "world" ]; then
-            echo "✅ World restored!"
-            echo "Size: $(du -sh world/ | cut -f1)"
+            echo "World restored! Size: $(du -sh world/ | cut -f1)"
           else
-            echo "⚠️ No world found. Fresh start."
+            echo "No world found. Fresh start."
           fi
 
       - name: Download and install Forge
@@ -91,8 +90,7 @@ jobs:
 
       - name: Start Minecraft Server
         run: |
-          echo "Starting server with screen..."
-          
+          echo "Starting server..."
           screen -dmS mc java -Xmx4G -Xms4G \
             -XX:+UseG1GC \
             -XX:+ParallelRefProcEnabled \
@@ -134,62 +132,28 @@ jobs:
           screen -S mc -X stuff "op muhammad12000$(printf '\r')"
           sleep 3
           screen -S mc -X stuff "op AbbasMaster$(printf '\r')"
+          sleep 3
+          echo "Admins set!"
 
-      - name: Monitor players and auto-shutdown
+      - name: Keep server running and auto-save
         run: |
-          echo "Monitoring players..."
-          echo "Server will stop after 10 min with 0 players"
-          echo "Max runtime: 5 hours 45 minutes"
+          echo "Server running. Auto-saving every 5 minutes."
+          echo "Max runtime: 5 hours 45 minutes."
           
-          EMPTY_TIME=0
-          TOTAL_TIME=0
-          SAVE_TIMER=0
-          MAX_RUNTIME=20700
+          TOTAL=0
           
-          while screen -list | grep -q mc; do
-            sleep 30
-            TOTAL_TIME=$((TOTAL_TIME + 30))
-            SAVE_TIMER=$((SAVE_TIMER + 30))
+          while screen -list | grep -q "mc"; do
+            sleep 300
+            TOTAL=$((TOTAL + 300))
             
-            PLAYER_LIST=$(grep "joined the game\|left the game" logs/latest.log 2>/dev/null | tail -20)
-            JOINED=$(echo "$PLAYER_LIST" | grep -c "joined the game" || echo "0")
-            LEFT=$(echo "$PLAYER_LIST" | grep -c "left the game" || echo "0")
-            ONLINE=$((JOINED - LEFT))
-            if [ "$ONLINE" -lt 0 ]; then ONLINE=0; fi
+            H=$((TOTAL / 3600))
+            M=$(( (TOTAL % 3600) / 60 ))
+            echo "Saving... (${H}h ${M}m)"
             
-            if [ "$ONLINE" -eq 0 ]; then
-              EMPTY_TIME=$((EMPTY_TIME + 30))
-              EMPTY_MIN=$((EMPTY_TIME / 60))
-              echo "No players online. Empty for ${EMPTY_MIN} minutes..."
-            else
-              EMPTY_TIME=0
-            fi
+            screen -S mc -X stuff "save-all$(printf '\r')"
             
-            if [ $SAVE_TIMER -ge 300 ]; then
-              SAVE_TIMER=0
-              HOURS=$((TOTAL_TIME / 3600))
-              MINUTES=$(((TOTAL_TIME % 3600) / 60))
-              echo "Auto-saving... (${HOURS}h ${MINUTES}m) Players: $ONLINE"
-              screen -S mc -X stuff "save-all$(printf '\r')"
-            fi
-            
-            if [ $EMPTY_TIME -ge 600 ]; then
-              echo "========================================="
-              echo "  No players for 10 minutes!"
-              echo "  Saving and stopping..."
-              echo "========================================="
-              screen -S mc -X stuff "save-all$(printf '\r')"
-              sleep 15
-              screen -S mc -X stuff "stop$(printf '\r')"
-              sleep 30
-              break
-            fi
-            
-            if [ $TOTAL_TIME -ge $MAX_RUNTIME ]; then
-              echo "========================================="
-              echo "  5h 45m reached!"
-              echo "  Saving and stopping..."
-              echo "========================================="
+            if [ $TOTAL -ge 20700 ]; then
+              echo "5h 45m reached. Stopping..."
               screen -S mc -X stuff "save-all$(printf '\r')"
               sleep 15
               screen -S mc -X stuff "stop$(printf '\r')"
@@ -205,7 +169,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "Deleting old caches..."
           gh cache list --json id,key -q '.[] | select(.key | startswith("mc-world-save-")) | .id' | while read id; do
             gh cache delete "$id" 2>/dev/null || true
           done
